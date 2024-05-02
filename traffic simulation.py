@@ -34,10 +34,11 @@ font = pygame.font.SysFont(None, 24)  # Create a font object from the system fon
 screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 pygame.display.set_caption("Grid Simulation with Intersection-Based Turning")
 
-# Define global variables for data logging
 traffic_data = []
-start_logging_time = None
-logging_active = True
+logging_duration = 15  # seconds
+start_logging_time = time.time()
+
+
 class TrafficLight:
     def __init__(self, change_interval=1):
         self.current_light = 0  # Start with 'left'
@@ -66,7 +67,7 @@ traffic_lights = {(i, j): TrafficLight() for i in range(1, GRID_SIZE) for j in r
 
 
 # Car data structures
-def generate_car():
+def generate_car(track=False):
     """Generates a car with a random starting position and destination."""
     start_line_choice = random.choice(['horizontal', 'vertical'])
     if start_line_choice == 'horizontal':
@@ -91,18 +92,21 @@ def generate_car():
     car_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
     start_time = random.uniform(0, 4)  # Random start time between 0 and 4 seconds
 
-    return {
+    car = {
         'pixel_position': [start_pixel_x, start_pixel_y],
         'destination': [destination_pixel_x, destination_pixel_y],
         'color': car_color,
         'start_time': start_time,
         'active': False,
-        'move_stage': 'vertical' if start_line_choice == 'vertical' else 'horizontal'
+        'move_stage': 'vertical' if start_line_choice == 'vertical' else 'horizontal',
+        'track': track,
+        'tracking_data': {'moving': [], 'distance_to_train': []}
     }
+    return car
 
 
 num_cars = 5
-cars = [generate_car() for _ in range(num_cars)]
+cars = [generate_car(track=True) for _ in range(num_cars)]
 
 # Define the train's properties
 train = {
@@ -132,6 +136,15 @@ def move_car(car):
     grid_x = (current_x - GRID_OFFSET + CAR_SIZE // 2) // CELL_SIZE
     grid_y = (current_y - GRID_OFFSET + CAR_SIZE // 2) // CELL_SIZE
 
+    # Calculate the center positions of the car and the train for distance check
+    car_center_x = current_x + CAR_SIZE // 2
+    car_center_y = current_y + CAR_SIZE // 2
+    train_center_x = train['position'][0] + train['size'][0] // 2
+    train_center_y = train['position'][1] + train['size'][1] // 2
+
+    # Euclidean distance between the car and the train
+    distance = euclidean_distance(car_center_x, car_center_y, train_center_x, train_center_y)
+
     # Calculate if the current position is an intersection
     is_at_intersection = (current_x - GRID_OFFSET + CAR_SIZE // 2) % CELL_SIZE == 0 and \
                          (current_y - GRID_OFFSET + CAR_SIZE // 2) % CELL_SIZE == 0
@@ -152,7 +165,7 @@ def move_car(car):
                     can_move = True
                 else:
                     can_move = False
-        if can_move:
+        if can_move and distance > CELL_SIZE // 2:
             if distance_x > 0:
                 car['pixel_position'][0] += CAR_SPEED if dest_x > current_x else -CAR_SPEED
             elif distance_x == 0 and distance_y > 0:
@@ -168,7 +181,7 @@ def move_car(car):
                     can_move = True
                 else:
                     can_move = False
-        if can_move:
+        if can_move and distance > CELL_SIZE // 2:
             if distance_y > 0:
                 car['pixel_position'][1] += CAR_SPEED if dest_y > current_y else -CAR_SPEED
             elif distance_y == 0 and distance_x > 0:
@@ -178,20 +191,42 @@ def move_car(car):
     # Check if the car reached its destination
     if current_x == dest_x and current_y == dest_y:
         car['active'] = False
+        if car['track']:
+            visualize_tracking_data()
+
+    if car['track']:
+        # Check if the car is currently moving
+        is_moving = car['move_stage'] if can_move and distance > CELL_SIZE // 2 else 'stopped'
+        # Calculate distance to train
+        train_center_x = train['position'][0] + train['size'][0] // 2
+        train_center_y = train['position'][1] + train['size'][1] // 2
+        car_center_x = current_x + CAR_SIZE // 2
+        car_center_y = current_y + CAR_SIZE // 2
+        distance_to_train = euclidean_distance(car_center_x, car_center_y, train_center_x, train_center_y)
+
+        # Log data
+        car['tracking_data']['moving'].append(is_moving)
+        car['tracking_data']['distance_to_train'].append(distance_to_train)
 
 
 def manage_cars(current_time):
-    """Checks each car's status; regenerates a car if it has reached its destination."""
-    global cars  # To modify the global list of cars
+    global cars, traffic_data, start_logging_time
+    active_count = 0
     for i, car in enumerate(cars):
         if car['active']:
             move_car(car)
+            active_count += 1
             if not car['active']:  # Car has reached its destination and becomes inactive
                 cars[i] = generate_car()  # Replace it with a new car
         else:
             # Activate the car if its start time has passed
             if current_time >= car['start_time']:
                 car['active'] = True
+                active_count += 1
+
+    # Log data every second
+    if int(current_time) % 1 == 0 and (time.time() - start_logging_time) <= logging_duration:
+        traffic_data.append(active_count)
 
 
 def draw_cars():
@@ -308,12 +343,52 @@ def update_traffic_lights():
     for light in traffic_lights.values():
         light.update()
 
+
+def plot_traffic_data():
+    global traffic_data
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(len(traffic_data)), traffic_data, marker='o', linestyle='-')
+    plt.title('Traffic Flow Over 15 Seconds')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Number of Active Cars')
+    plt.grid(True)
+    plt.show()
+
+
+def visualize_tracking_data():
+    for i, car in enumerate(cars):
+        if car['track'] and not car['active']:
+            plt.figure(figsize=(12, 6))
+            times = range(len(car['tracking_data']['moving']))
+            distances = car['tracking_data']['distance_to_train']
+
+            plt.subplot(1, 2, 1)
+            plt.plot(times, distances, marker='o', linestyle='-', label='Distance to Train')
+            plt.axhline(y=CELL_SIZE // 2, color='r', linestyle='--', label='Safety Threshold (CELL_SIZE // 2)')
+            plt.title(f'Car {i} Distance to Train')
+            plt.xlabel('Time Steps')
+            plt.ylabel('Distance')
+            plt.legend()
+
+            plt.subplot(1, 2, 2)
+            moving_status = [1 if status != 'stopped' else 0 for status in car['tracking_data']['moving']]
+            plt.step(times, moving_status, where='post', linestyle='-', color='blue', label='Moving')
+            plt.title(f'Car {i} Movement Status')
+            plt.xlabel('Time Steps')
+            plt.yticks([0, 1], ['Stopped', 'Moving'])
+            plt.ylim(-0.5, 1.5)
+            plt.legend()
+
+            plt.tight_layout()
+            plt.show()
+
+
 def main():
-    global start_logging_time, logging_active
+    global start_logging_time
     clock = pygame.time.Clock()
     start_ticks = pygame.time.get_ticks()
     running = True
-    start_logging_time = time.time()
+    data_plotted = False
 
     while running:
         current_ticks = pygame.time.get_ticks()
@@ -323,13 +398,10 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
 
-        if logging_active and (time.time() - start_logging_time) > 15:
-            logging_active = False
-            plt.plot([td[0] for td in traffic_data], [td[1] for td in traffic_data], marker='o', linestyle='-')
-            plt.title('Traffic Data Over Time')
-            plt.xlabel('Time (s)')
-            plt.ylabel('Number of Cars Passing a Point')
-            plt.show()
+        # if not data_plotted and (time.time() - start_logging_time > logging_duration):
+        #     visualize_tracking_data()
+        #     data_plotted = True
+
         screen.fill(BLACK)
         draw_grid()
         manage_cars(current_time)
