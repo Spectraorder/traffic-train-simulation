@@ -2,6 +2,8 @@
 
 This Traffic Simulation project is developed using Pygame to model and visualize traffic flow on a grid-based map featuring interactive cars and a train. The simulation includes dynamic traffic lights that influence car movements, a train that moves cyclically through a central path, and cars that navigate through the grid based on traffic light signals.
 
+https://github.com/Spectraorder/traffic-train-simulation/assets/67780872/2fffece2-eb6b-4b94-af58-468e8ad0a736
+
 ## Features
 
 - **Dynamic Traffic Lights**: Traffic lights change state at set intervals, controlling the flow of car traffic at intersections.
